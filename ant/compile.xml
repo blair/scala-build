@@ -154,7 +154,7 @@
   <target name="find-svn-revision" if="use.svn">
     <!-- ask svnversion for the revisions in the working copy, for memoizing inside the built jar -->
     <exec outputproperty="revision" executable="svnversion" failifexecutionfails="false"/>
-    <exec outputproperty="revision-short" executable="svnversion" failifexecutionfails="false"/>
+    <property name="revision-short" value="${revision}" />
   </target>
 
   <target name="find-revision" depends="find-git-revision, find-hg-revision, find-svn-revision" />
