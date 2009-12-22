@@ -22,14 +22,14 @@ read -p "  project name (like 'echod'): " -e project_name
 read -p "  description for humans: " -e description
 echo "  ----------"
 read -p "  using thrift? [n]: " -e use_thrift
-read -p "  using jmock? [n]: " -e use_jmock
+read -p "  using jmock? [y]: " -e use_jmock
 read -p "  need init.d script? [n]: " -e use_initd
 
 test "x$package_root" = "x" && package_root="com.example"
 test "x$project_name" = "x" && project_name="echod"
 test "x$description" = "x" && description="sample project"
 test "x$use_thrift" = "x" && use_thrift="n"
-test "x$use_jmock" = "x" && use_jmock="n"
+test "x$use_jmock" = "x" && use_jmock="y"
 test "x$use_initd" = "x" && use_initd="n"
 package_path=$(echo ${package_root} | sed -e 's/\./\//g')
 
@@ -50,6 +50,7 @@ cat ivy/ivy.xml | \
 cat build.xml | \
   sed -e "s/<project name=\".*\" default/<project name=\"${project_name}\" default/" \
       -e "s/<description>.*<\/description>/<description>${description}<\/description>/" \
+      -e "s/usr\/local\/example/usr\/local\/${project_name}/" \
       > build2.xml && \
   mv build2.xml build.xml
 
@@ -77,6 +78,8 @@ test $use_jmock = "n" || {
   inject_dep org.objenesis objenesis 1.1 "test->*"
 }
 
+inject_dep com.twitter xrayspecs 1.0.7 "test->*"
+
 cat >src/main/scala/${package_path}/${project_name}/Main.scala <<__EOF__
 package ${package_root}.${project_name}
 
@@ -90,10 +93,33 @@ __EOF__
 cat >src/test/scala/${package_path}/${project_name}/TestRunner.scala <<__EOF__
 package ${package_root}.${project_name}
 
-import org.specs.runner.SpecsFileRunner
+import com.twitter.xrayspecs.XraySpecsRunner
 
-object TestRunner extends SpecsFileRunner("src/test/scala/**/*.scala", ".*",
-  System.getProperty("system", ".*"), System.getProperty("example", ".*"))
+object TestRunner extends XraySpecsRunner
+__EOF__
+
+cat >src/test/scala/${package_path}/${project_name}/SampleSpec.scala << __EOF__
+package ${package_root}.${project_name}
+
+import org.specs.Specification
+import org.specs.mock.{ClassMocker, JMocker}
+
+object SampleSpec extends Specification with JMocker with ClassMocker {
+  "Sample" should {
+    "run a test" in {
+      23 mustEqual 23
+    }
+  }
+}
+__EOF__
+
+mv .git .git-scala-build 2>/dev/null || echo
+mkdir -p libs
+
+cat >.gitignore << __EOF__
+.git*
+target
+dist
 __EOF__
 
 echo "Done."
