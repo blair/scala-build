@@ -23,7 +23,7 @@ read -p "  description for humans: " -e description
 echo "  ----------"
 read -p "  using thrift? [n]: " -e use_thrift
 read -p "  using jmock? [y]: " -e use_jmock
-read -p "  need init.d script? [n]: " -e use_initd
+read -p "  building a server (start/stop script & admin port)? [n]: " -e use_initd
 
 test "x$package_root" = "x" && package_root="com.example"
 test "x$project_name" = "x" && project_name="echod"
@@ -61,6 +61,38 @@ else
     sed -e "s/example/${project_name}/" \
     > src/scripts/${project_name}.sh && \
     rm src/scripts/startup.sh
+  inject_dep com.twitter ostrich 1.0 "*"
+  mkdir -p config
+  cat >config/development.conf <<__EOF__
+admin_text_port = 9989
+admin_http_port = 9990
+
+log {
+  level = "info"
+  console = false
+  filename = "${project_name}.log"
+  roll = "never"
+}
+__EOF__
+  cat >config/test.conf <<__EOF__
+admin_text_port = 9989
+admin_http_port = 9990
+
+log {
+  level = "fatal"
+  console = true
+}
+__EOF__
+  cat >config/production.conf <<__EOF__
+admin_text_port = 9989
+admin_http_port = 9990
+
+log {
+  filename = "/var/log/${project_name}/production.log"
+  level = "info"
+  roll = "hourly"
+}
+__EOF__
 fi
 
 mkdir -p src/main/scala/${package_path}/${project_name}
@@ -78,9 +110,10 @@ test $use_jmock = "n" || {
   inject_dep org.objenesis objenesis 1.1 "test->*"
 }
 
-inject_dep com.twitter xrayspecs 1.0.7 "test->*"
+inject_dep com.twitter xrayspecs 1.0.7 "*"
 
-cat >src/main/scala/${package_path}/${project_name}/Main.scala <<__EOF__
+if test $use_initd = "n"; then
+  cat >src/main/scala/${package_path}/${project_name}/Main.scala <<__EOF__
 package ${package_root}.${project_name}
 
 object Main {
@@ -89,6 +122,43 @@ object Main {
   }
 }
 __EOF__
+else
+  cat >src/main/scala/${package_path}/${project_name}/Main.scala <<__EOF__
+package ${package_root}.${project_name}
+
+import com.twitter.ostrich.{BackgroundProcess, Server, ServerInterface, Stats}
+import net.lag.configgy.{Configgy, RuntimeEnvironment}
+import net.lag.logging.Logger
+
+object Main extends ServerInterface {
+  val log = Logger.get(getClass.getName)
+
+  def main(args: Array[String]) {
+    val runtime = new RuntimeEnvironment(getClass)
+    runtime.load(args)
+    val config = Configgy.config
+    Server.startAdmin(this, config, runtime)
+
+    log.info("Starting ${project_name}!")
+    BackgroundProcess.spawnDaemon("main") {
+      while (true) {
+        Thread.sleep(2000)
+        Stats.incr("sheep")
+      }
+    }
+  }
+
+  def shutdown() {
+    log.info("Shutting down!")
+    System.exit(0)
+  }
+
+  def quiesce() {
+    shutdown()
+  }
+}
+__EOF__
+fi
 
 cat >src/test/scala/${package_path}/${project_name}/TestRunner.scala <<__EOF__
 package ${package_root}.${project_name}
@@ -124,5 +194,3 @@ __EOF__
 
 echo "Done."
 echo
-
-# <!--dependency org="org.mockito" name="mockito-core" rev="1.7" conf="test->*"/-->
